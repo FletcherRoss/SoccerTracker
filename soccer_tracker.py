@@ -185,8 +185,14 @@ DATA_FILE = "soccer_stats.json"
 
 def load_data():
     if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, "r") as f:
-            return json.load(f)
+        try:
+            with open(DATA_FILE, "r") as f:
+                content = f.read().strip()
+                if not content:
+                    return {"games": []}
+                return json.loads(content)
+        except (json.JSONDecodeError, ValueError):
+            return {"games": []}
     return {"games": []}
 
 def save_data(data):
