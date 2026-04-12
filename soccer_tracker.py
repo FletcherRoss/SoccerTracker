@@ -37,7 +37,7 @@ html, body, [class*="css"] { font-family: 'Source Sans 3', sans-serif; }
     font-size: 0.8rem;
     letter-spacing: 4px;
     text-transform: uppercase;
-    margin-top: 2px;
+    margin-top: 5px;
 }
 
 /* ── Stat cards ── */
