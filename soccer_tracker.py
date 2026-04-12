@@ -21,7 +21,7 @@ st.markdown("""
 
 html, body, [class*="css"] { font-family: 'Source Sans 3', sans-serif; }
 .main { background: #0b1a0e; }
-.block-container { padding: 1.5rem 2rem 8rem; max-width: 1200px; }
+.block-container { padding: 1.5rem 8rem 8rem; max-width: 1200px; }
 
 /* ── Title ── */
 .app-title {
