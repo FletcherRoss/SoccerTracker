@@ -304,20 +304,24 @@ with col_logo:
     st.markdown('<div class="app-sub">Player Performance Dashboard</div>', unsafe_allow_html=True)
 with col_nav:
     st.markdown("<br>", unsafe_allow_html=True)
-    n1, n2, n3 = st.columns(3)
-    with n1:
-        if st.button("🏠 Home"):
-            st.session_state.screen = "home"
-            st.rerun()
-    with n2:
-        if st.button("📋 History"):
-            st.session_state.screen = "history"
-            st.rerun()
-    with n3:
-        if st.session_state.screen == "tracking":
-            if st.button("💾 Save Game"):
-                gid = save_current_game()
-                st.success(f"Game saved!")
+    n1, n2, n3, n4 = st.columns(4)
+with n1:
+    if st.button("🏠 Home"):
+        st.session_state.screen = "home"
+        st.rerun()
+with n2:
+    if st.button("📋 History"):
+        st.session_state.screen = "history"
+        st.rerun()
+with n3:
+    if st.button("📈 Trends"):
+        st.session_state.screen = "trends"
+        st.rerun()
+with n4:
+    if st.session_state.screen == "tracking":
+        if st.button("💾 Save Game"):
+            gid = save_current_game()
+            st.success("Game saved!")
 
 st.markdown("<hr style='border:1px solid #1e3a23; margin: 0.5rem 0 1rem;'>", unsafe_allow_html=True)
 
@@ -610,3 +614,208 @@ elif st.session_state.screen == "history":
                     data["games"] = [g for g in data["games"] if g["id"] != game["id"]]
                     save_data(data)
                     st.rerun()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SCREEN: TRENDS
+# ─────────────────────────────────────────────────────────────────────────────
+elif st.session_state.screen == "trends":
+    import pandas as pd
+
+    st.markdown('<div class="section-label">Player Trends</div>', unsafe_allow_html=True)
+
+    data = load_data()
+
+    if not data["games"]:
+        st.markdown('<div style="color:#3a6b3e; font-size:0.9rem;">No games saved yet. Track some games first!</div>', unsafe_allow_html=True)
+    else:
+        # Get unique player names
+        players = sorted(set(g["player"] for g in data["games"]))
+
+        # Player selector
+        selected_player = st.selectbox("Select Player", players)
+
+        # Filter games for that player and sort by date
+        player_games = sorted(
+            [g for g in data["games"] if g["player"] == selected_player],
+            key=lambda g: g["date"]
+        )
+
+        if len(player_games) < 1:
+            st.info("No games found for this player.")
+        else:
+            # Build dataframe
+            rows = []
+            for g in player_games:
+                s = g["stats"]
+                total_passes = s["passes_successful"] + s["passes_unsuccessful"]
+                acc = round(s["passes_successful"] / total_passes * 100, 1) if total_passes > 0 else 0
+                total_shots = s["shots_on_target"] + s["shots_off_target"]
+                shot_acc = round(s["shots_on_target"] / total_shots * 100, 1) if total_shots > 0 else 0
+                rows.append({
+                    "Date": g["date"],
+                    "Opponent": g["opponent"],
+                    "Goals": s["goals"],
+                    "Assists": s["assists"],
+                    "Goal Contributions": s["goals"] + s["assists"],
+                    "Successful Passes": s["passes_successful"],
+                    "Unsuccessful Passes": s["passes_unsuccessful"],
+                    "Total Passes": total_passes,
+                    "Pass Accuracy %": acc,
+                    "Shots on Target": s["shots_on_target"],
+                    "Shots off Target": s["shots_off_target"],
+                    "Total Shots": total_shots,
+                    "Shot Accuracy %": shot_acc,
+                    "Steals": s["steals"],
+                    "Interceptions": s["interceptions"],
+                    "Clearances": s["clearances"],
+                    "Turnovers": s["turnovers"],
+                    "Fouls Won": s["fouls_won"],
+                    "Fouls Committed": s["fouls_committed"],
+                })
+
+            df = pd.DataFrame(rows)
+
+            # ── Career summary cards ──────────────────────────────────
+            st.markdown('<div class="section-label">Career Averages</div>', unsafe_allow_html=True)
+
+            avg = df.mean(numeric_only=True)
+            total = df.sum(numeric_only=True)
+            games_played = len(df)
+
+            s1, s2, s3, s4, s5, s6 = st.columns(6)
+            with s1:
+                st.markdown(f"""
+                <div class="stat-card">
+                    <div class="stat-number">{int(total['Goals'])}</div>
+                    <div class="stat-label">⚽ Total Goals</div>
+                    <div class="stat-sub">{avg['Goals']:.1f} per game</div>
+                </div>""", unsafe_allow_html=True)
+            with s2:
+                st.markdown(f"""
+                <div class="stat-card">
+                    <div class="stat-number">{int(total['Assists'])}</div>
+                    <div class="stat-label">🎯 Total Assists</div>
+                    <div class="stat-sub">{avg['Assists']:.1f} per game</div>
+                </div>""", unsafe_allow_html=True)
+            with s3:
+                st.markdown(f"""
+                <div class="stat-card">
+                    <div class="stat-number">{avg['Pass Accuracy %']:.1f}%</div>
+                    <div class="stat-label">✅ Avg Pass Acc.</div>
+                    <div class="stat-sub">{int(total['Total Passes'])} total passes</div>
+                </div>""", unsafe_allow_html=True)
+            with s4:
+                st.markdown(f"""
+                <div class="stat-card">
+                    <div class="stat-number">{int(total['Steals'])}</div>
+                    <div class="stat-label">🔵 Total Steals</div>
+                    <div class="stat-sub">{avg['Steals']:.1f} per game</div>
+                </div>""", unsafe_allow_html=True)
+            with s5:
+                st.markdown(f"""
+                <div class="stat-card">
+                    <div class="stat-number">{int(total['Turnovers'])}</div>
+                    <div class="stat-label">🔴 Total Turnovers</div>
+                    <div class="stat-sub">{avg['Turnovers']:.1f} per game</div>
+                </div>""", unsafe_allow_html=True)
+            with s6:
+                st.markdown(f"""
+                <div class="stat-card">
+                    <div class="stat-number">{games_played}</div>
+                    <div class="stat-label">📋 Games Played</div>
+                    <div class="stat-sub">all time</div>
+                </div>""", unsafe_allow_html=True)
+
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            # ── Stat selector for chart ───────────────────────────────
+            st.markdown('<div class="section-label">Game-by-Game Trend</div>', unsafe_allow_html=True)
+
+            STAT_OPTIONS = [
+                "Goals",
+                "Assists",
+                "Goal Contributions",
+                "Pass Accuracy %",
+                "Total Passes",
+                "Successful Passes",
+                "Unsuccessful Passes",
+                "Shots on Target",
+                "Total Shots",
+                "Shot Accuracy %",
+                "Steals",
+                "Interceptions",
+                "Clearances",
+                "Turnovers",
+                "Fouls Won",
+                "Fouls Committed",
+            ]
+
+            col_stat, col_chart_type = st.columns([3, 1])
+            with col_stat:
+                selected_stats = st.multiselect(
+                    "Choose stats to compare",
+                    options=STAT_OPTIONS,
+                    default=["Goals", "Assists", "Pass Accuracy %"]
+                )
+            with col_chart_type:
+                chart_type = st.selectbox("Chart type", ["Line", "Bar"])
+
+            if selected_stats:
+                chart_df = df[["Date"] + selected_stats].set_index("Date")
+
+                if chart_type == "Line":
+                    st.line_chart(chart_df, use_container_width=True, height=350)
+                else:
+                    st.bar_chart(chart_df, use_container_width=True, height=350)
+            else:
+                st.info("Select at least one stat above to see the chart.")
+
+            # ── Game by game table ────────────────────────────────────
+            st.markdown('<div class="section-label">Full Game Log</div>', unsafe_allow_html=True)
+
+            display_cols = ["Date", "Opponent", "Goals", "Assists",
+                            "Pass Accuracy %", "Total Passes", "Steals",
+                            "Turnovers", "Interceptions", "Shots on Target"]
+
+            st.dataframe(
+                df[display_cols].style.format({
+                    "Pass Accuracy %": "{:.1f}%",
+                    "Shot Accuracy %": "{:.1f}%",
+                }),
+                use_container_width=True,
+                hide_index=True
+            )
+
+            # ── Best/worst game highlights ────────────────────────────
+            if len(df) > 1:
+                st.markdown('<div class="section-label">Highlights</div>', unsafe_allow_html=True)
+
+                h1, h2, h3 = st.columns(3)
+                best_goals_idx = df["Goals"].idxmax()
+                best_pass_idx  = df["Pass Accuracy %"].idxmax()
+                best_steals_idx = df["Steals"].idxmax()
+
+                with h1:
+                    bg = df.loc[best_goals_idx]
+                    st.markdown(f"""
+                    <div class="stat-card">
+                        <div class="stat-number">⚽ {int(bg['Goals'])}</div>
+                        <div class="stat-label">Best Goals Game</div>
+                        <div class="stat-sub">vs {bg['Opponent']} · {bg['Date']}</div>
+                    </div>""", unsafe_allow_html=True)
+                with h2:
+                    bp = df.loc[best_pass_idx]
+                    st.markdown(f"""
+                    <div class="stat-card">
+                        <div class="stat-number">✅ {bp['Pass Accuracy %']:.0f}%</div>
+                        <div class="stat-label">Best Pass Accuracy</div>
+                        <div class="stat-sub">vs {bp['Opponent']} · {bp['Date']}</div>
+                    </div>""", unsafe_allow_html=True)
+                with h3:
+                    bs = df.loc[best_steals_idx]
+                    st.markdown(f"""
+                    <div class="stat-card">
+                        <div class="stat-number">🔵 {int(bs['Steals'])}</div>
+                        <div class="stat-label">Most Steals Game</div>
+                        <div class="stat-sub">vs {bs['Opponent']} · {bs['Date']}</div>
+                    </div>""", unsafe_allow_html=True)
