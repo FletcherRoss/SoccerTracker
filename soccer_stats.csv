@@ -1,2 +1,3 @@
 id,saved_at,date,player,opponent,is_goalie,goals,assists,passes_successful,passes_unsuccessful,pass_accuracy_pct,shots_on_target,shots_off_target,shot_accuracy_pct,steals,interceptions,clearances,turnovers,fouls_won,fouls_committed,saves,goals_allowed,goalie_clearances,save_pct
 20260418_134411,2026-04-18 13:44,2026-04-18,Oakley,Norton,True,1,1,7,2,77.8,3,1,75.0,1,3,1,0,0,0,4,2,2,66.7
+20260418_134413,2026-04-18 13:44,2026-04-18,Oakley,Norton,True,1,1,7,2,77.8,3,1,75.0,1,3,1,0,0,0,4,2,2,66.7
