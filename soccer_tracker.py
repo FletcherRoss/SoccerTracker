@@ -346,7 +346,49 @@ def push_csv_to_github(games: list) -> tuple[bool, str]:
     except requests.RequestException as e:
         return False, f"Network error: {e}"
 
+def _csv_row_to_game(row: dict) -> dict:
+    """Convert a flat CSV row back into the nested game dict used by the app."""
+    def i(k): return int(float(row.get(k, 0) or 0))
+    return {
+        "id":       row.get("id", ""),
+        "player":   row.get("player", ""),
+        "opponent": row.get("opponent", ""),
+        "date":     row.get("date", ""),
+        "saved_at": row.get("saved_at", ""),
+        "is_goalie": str(row.get("is_goalie", "False")).lower() in ("true", "1", "yes"),
+        "stats": {
+            "goals":                i("goals"),
+            "assists":              i("assists"),
+            "passes_successful":    i("passes_successful"),
+            "passes_unsuccessful":  i("passes_unsuccessful"),
+            "shots_on_target":      i("shots_on_target"),
+            "shots_off_target":     i("shots_off_target"),
+            "steals":               i("steals"),
+            "interceptions":        i("interceptions"),
+            "clearances":           i("clearances"),
+            "turnovers":            i("turnovers"),
+            "fouls_won":            i("fouls_won"),
+            "fouls_committed":      i("fouls_committed"),
+            "saves":                i("saves"),
+            "goals_allowed":        i("goals_allowed"),
+            "goalie_clearances":    i("goalie_clearances"),
+        },
+        "event_log": [],  # event log not stored in CSV
+    }
+
 def load_data():
+    """Load games — CSV is the source of truth; JSON is fallback."""
+    # ── Try CSV first ──────────────────────────────────────────────────
+    if os.path.exists(CSV_FILE):
+        try:
+            with open(CSV_FILE, "r", newline="", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                games = [_csv_row_to_game(row) for row in reader]
+            if games:
+                return {"games": games}
+        except Exception:
+            pass
+    # ── Fallback to JSON ───────────────────────────────────────────────
     if os.path.exists(DATA_FILE):
         try:
             with open(DATA_FILE, "r") as f:
@@ -453,6 +495,14 @@ def save_percentage():
     pct = s["saves"] / total_faced * 100
     return round(pct, 1), total_faced
 
+def _write_local_csv(games: list):
+    """Rewrite the local CSV from all games so load_data() stays in sync."""
+    with open(CSV_FILE, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS, lineterminator="\n")
+        writer.writeheader()
+        for g in games:
+            writer.writerow(_game_to_csv_row(g))
+
 def save_current_game():
     data = load_data()
     game = {
@@ -467,6 +517,7 @@ def save_current_game():
     }
     data["games"].append(game)
     save_data(data)
+    _write_local_csv(data["games"])   # keep local CSV in sync
     gh_ok, gh_msg = push_csv_to_github(data["games"])
     return game["id"], gh_ok, gh_msg
 
@@ -476,6 +527,7 @@ def reset_tracker():
         if k in st.session_state:
             del st.session_state[k]
     init_session()
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # HEADER
@@ -571,6 +623,7 @@ if st.session_state.screen == "home":
                 <div class="saved-game-date">{game['date']} · Saved {game['saved_at']}</div>
             </div>
             """, unsafe_allow_html=True)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SCREEN: TRACKING
