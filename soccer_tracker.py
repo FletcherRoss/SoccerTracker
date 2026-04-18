@@ -1,6 +1,9 @@
 import streamlit as st
 import json
 import os
+import csv
+import base64
+import requests
 from datetime import datetime
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -236,6 +239,112 @@ div[data-testid="column"] .stButton > button {
 # DATA STORAGE
 # ─────────────────────────────────────────────────────────────────────────────
 DATA_FILE = "soccer_stats.json"
+CSV_FILE  = "soccer_stats.csv"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GITHUB CSV SYNC
+# ─────────────────────────────────────────────────────────────────────────────
+CSV_COLUMNS = [
+    "id", "saved_at", "date", "player", "opponent", "is_goalie",
+    "goals", "assists", "passes_successful", "passes_unsuccessful",
+    "pass_accuracy_pct", "shots_on_target", "shots_off_target",
+    "shot_accuracy_pct", "steals", "interceptions", "clearances",
+    "turnovers", "fouls_won", "fouls_committed",
+    "saves", "goals_allowed", "goalie_clearances", "save_pct",
+]
+
+def _game_to_csv_row(game: dict) -> dict:
+    s = game["stats"]
+    total_passes = s["passes_successful"] + s["passes_unsuccessful"]
+    pass_acc = round(s["passes_successful"] / total_passes * 100, 1) if total_passes else 0
+    total_shots = s["shots_on_target"] + s["shots_off_target"]
+    shot_acc = round(s["shots_on_target"] / total_shots * 100, 1) if total_shots else 0
+    saves = s.get("saves", 0)
+    goals_allowed = s.get("goals_allowed", 0)
+    total_faced = saves + goals_allowed
+    sv_pct = round(saves / total_faced * 100, 1) if total_faced else 0
+    return {
+        "id":                    game["id"],
+        "saved_at":              game["saved_at"],
+        "date":                  game["date"],
+        "player":                game["player"],
+        "opponent":              game["opponent"],
+        "is_goalie":             game.get("is_goalie", False),
+        "goals":                 s["goals"],
+        "assists":               s["assists"],
+        "passes_successful":     s["passes_successful"],
+        "passes_unsuccessful":   s["passes_unsuccessful"],
+        "pass_accuracy_pct":     pass_acc,
+        "shots_on_target":       s["shots_on_target"],
+        "shots_off_target":      s["shots_off_target"],
+        "shot_accuracy_pct":     shot_acc,
+        "steals":                s["steals"],
+        "interceptions":         s["interceptions"],
+        "clearances":            s["clearances"],
+        "turnovers":             s["turnovers"],
+        "fouls_won":             s["fouls_won"],
+        "fouls_committed":       s["fouls_committed"],
+        "saves":                 saves,
+        "goals_allowed":         goals_allowed,
+        "goalie_clearances":     s.get("goalie_clearances", 0),
+        "save_pct":              sv_pct,
+    }
+
+def _build_csv_content(games: list) -> str:
+    """Rebuild full CSV string from all games."""
+    import io
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=CSV_COLUMNS, lineterminator="\n")
+    writer.writeheader()
+    for g in games:
+        writer.writerow(_game_to_csv_row(g))
+    return buf.getvalue()
+
+def push_csv_to_github(games: list) -> tuple[bool, str]:
+    """
+    Push the full CSV to GitHub (create or update soccer_stats.csv in repo root).
+    Reads token + repo from st.secrets[github].
+    Returns (success: bool, message: str).
+    """
+    try:
+        token = st.secrets["github"]["token"]
+        repo  = st.secrets["github"]["repo"]
+    except Exception:
+        return False, "GitHub secrets not configured. Add [github] token and repo to Streamlit secrets."
+
+    csv_content = _build_csv_content(games)
+    encoded = base64.b64encode(csv_content.encode()).decode()
+
+    api_url = f"https://api.github.com/repos/{repo}/contents/{CSV_FILE}"
+    headers = {
+        "Authorization": f"token {token}",
+        "Accept": "application/vnd.github+json",
+    }
+
+    # Check if file already exists to get its SHA (required for updates)
+    sha = None
+    try:
+        r = requests.get(api_url, headers=headers, timeout=10)
+        if r.status_code == 200:
+            sha = r.json().get("sha")
+    except requests.RequestException:
+        pass
+
+    payload = {
+        "message": f"stats: update soccer_stats.csv — {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+        "content": encoded,
+    }
+    if sha:
+        payload["sha"] = sha
+
+    try:
+        r = requests.put(api_url, headers=headers, json=payload, timeout=15)
+        if r.status_code in (200, 201):
+            return True, "✅ Stats pushed to GitHub"
+        else:
+            return False, f"GitHub API error {r.status_code}: {r.json().get('message', 'unknown error')}"
+    except requests.RequestException as e:
+        return False, f"Network error: {e}"
 
 def load_data():
     if os.path.exists(DATA_FILE):
@@ -358,7 +467,8 @@ def save_current_game():
     }
     data["games"].append(game)
     save_data(data)
-    return game["id"]
+    gh_ok, gh_msg = push_csv_to_github(data["games"])
+    return game["id"], gh_ok, gh_msg
 
 def reset_tracker():
     keys = ["player_name","opponent","game_date","game_minute","is_goalie","stats","event_log","viewing_game"]
@@ -392,8 +502,12 @@ with n3:
 with n4:
     if st.session_state.screen == "tracking":
         if st.button("💾 Save Game"):
-            gid = save_current_game()
+            gid, gh_ok, gh_msg = save_current_game()
             st.success("Game saved!")
+            if gh_ok:
+                st.success(gh_msg)
+            else:
+                st.warning(gh_msg)
 
 st.markdown("<hr style='border:1px solid #1e3a23; margin: 0.5rem 0 1rem;'>", unsafe_allow_html=True)
 
@@ -671,14 +785,20 @@ elif st.session_state.screen == "tracking":
             st.rerun()
     with save_col:
         if st.button("💾  Save Game"):
-            save_current_game()
-            st.success("✅ Game saved!")
+            _, gh_ok, gh_msg = save_current_game()
+            if gh_ok:
+                st.success(f"✅ Game saved! {gh_msg}")
+            else:
+                st.success("✅ Game saved locally.")
+                st.warning(gh_msg)
             st.rerun()
     with end_col:
         if st.button("🏁  End & Save Game"):
-            save_current_game()
+            _, gh_ok, gh_msg = save_current_game()
             reset_tracker()
             st.session_state.screen = "history"
+            if not gh_ok:
+                st.session_state["_gh_warn"] = gh_msg
             st.rerun()
 
     # ── Event log ─────────────────────────────────────────────────────
@@ -699,6 +819,10 @@ elif st.session_state.screen == "tracking":
 # ─────────────────────────────────────────────────────────────────────────────
 elif st.session_state.screen == "history":
     st.markdown('<div class="section-label">Game History</div>', unsafe_allow_html=True)
+
+    # Show deferred GitHub push warning from End & Save
+    if st.session_state.get("_gh_warn"):
+        st.warning(st.session_state.pop("_gh_warn"))
 
     data = load_data()
 
