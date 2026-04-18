@@ -69,6 +69,30 @@ html, body, [class*="css"] { font-family: 'Source Sans 3', sans-serif; }
     margin-top: 2px;
 }
 
+/* ── Goalie stat card (accent in gold/amber) ── */
+.stat-card-goalie {
+    background: #1a1a0e;
+    border: 1px solid #3a3a1e;
+    border-radius: 10px;
+    padding: 1rem;
+    text-align: center;
+    margin-bottom: 0.5rem;
+}
+.stat-number-goalie {
+    font-family: 'Oswald', sans-serif;
+    font-size: 2.6rem;
+    font-weight: 700;
+    color: #ffc107;
+    line-height: 1;
+}
+.stat-label-goalie {
+    font-size: 0.68rem;
+    color: #a08030;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin-top: 4px;
+}
+
 /* ── Event buttons ── */
 .event-section {
     background: #0f2214;
@@ -77,10 +101,25 @@ html, body, [class*="css"] { font-family: 'Source Sans 3', sans-serif; }
     padding: 1.2rem 1.4rem;
     margin-bottom: 1rem;
 }
+.event-section-goalie {
+    background: #14140a;
+    border: 1px solid #3a3a1e;
+    border-radius: 12px;
+    padding: 1.2rem 1.4rem;
+    margin-bottom: 1rem;
+}
 .event-section-title {
     font-family: 'Oswald', sans-serif;
     font-size: 0.85rem;
     color: #4caf50;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    margin-bottom: 0.8rem;
+}
+.event-section-title-goalie {
+    font-family: 'Oswald', sans-serif;
+    font-size: 0.85rem;
+    color: #ffc107;
     letter-spacing: 3px;
     text-transform: uppercase;
     margin-bottom: 0.8rem;
@@ -141,6 +180,21 @@ html, body, [class*="css"] { font-family: 'Source Sans 3', sans-serif; }
     transition: width 0.3s;
 }
 
+/* ── Save percentage bar (goalie) ── */
+.save-bar-bg {
+    background: #2a2a10;
+    border-radius: 4px;
+    height: 8px;
+    margin-top: 6px;
+    overflow: hidden;
+}
+.save-bar-fill {
+    background: #ffc107;
+    height: 8px;
+    border-radius: 4px;
+    transition: width 0.3s;
+}
+
 /* ── Saved games list ── */
 .saved-game-row {
     background: #0f2214;
@@ -179,7 +233,7 @@ div[data-testid="column"] .stButton > button {
 """, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# DATA STORAGE — JSON file (works locally and on Streamlit Cloud via GitHub)
+# DATA STORAGE
 # ─────────────────────────────────────────────────────────────────────────────
 DATA_FILE = "soccer_stats.json"
 
@@ -204,11 +258,12 @@ def save_data(data):
 # ─────────────────────────────────────────────────────────────────────────────
 def init_session():
     defaults = {
-        "screen": "home",           # home | tracking | history | view_game
+        "screen": "home",
         "player_name": "",
         "opponent": "",
         "game_date": "",
         "game_minute": 0,
+        "is_goalie": False,
         "stats": {
             "goals": 0,
             "assists": 0,
@@ -222,6 +277,10 @@ def init_session():
             "fouls_committed": 0,
             "clearances": 0,
             "interceptions": 0,
+            # ── Goalie stats ──
+            "saves": 0,
+            "goals_allowed": 0,
+            "goalie_clearances": 0,
         },
         "event_log": [],
         "viewing_game": None,
@@ -261,9 +320,13 @@ def undo_last():
         "⚠️ Foul Committed":         "fouls_committed",
         "🛡️ Clearance":              "clearances",
         "✂️ Interception":           "interceptions",
+        # Goalie
+        "🧤 Save":                    "saves",
+        "🚨 Goal Allowed":            "goals_allowed",
+        "👊 Goalie Clearance":        "goalie_clearances",
     }
     key = event_to_stat.get(last["event"])
-    if key and st.session_state.stats[key] > 0:
+    if key and st.session_state.stats.get(key, 0) > 0:
         st.session_state.stats[key] -= 1
 
 def pass_accuracy():
@@ -273,6 +336,14 @@ def pass_accuracy():
     acc = st.session_state.stats["passes_successful"] / total * 100
     return round(acc, 1), total
 
+def save_percentage():
+    s = st.session_state.stats
+    total_faced = s["saves"] + s["goals_allowed"]
+    if total_faced == 0:
+        return 0, 0
+    pct = s["saves"] / total_faced * 100
+    return round(pct, 1), total_faced
+
 def save_current_game():
     data = load_data()
     game = {
@@ -281,6 +352,7 @@ def save_current_game():
         "opponent": st.session_state.opponent,
         "date": st.session_state.game_date,
         "saved_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "is_goalie": st.session_state.is_goalie,
         "stats": dict(st.session_state.stats),
         "event_log": list(st.session_state.event_log),
     }
@@ -289,7 +361,7 @@ def save_current_game():
     return game["id"]
 
 def reset_tracker():
-    keys = ["player_name","opponent","game_date","game_minute","stats","event_log","viewing_game"]
+    keys = ["player_name","opponent","game_date","game_minute","is_goalie","stats","event_log","viewing_game"]
     for k in keys:
         if k in st.session_state:
             del st.session_state[k]
@@ -326,7 +398,7 @@ with n4:
 st.markdown("<hr style='border:1px solid #1e3a23; margin: 0.5rem 0 1rem;'>", unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SCREEN: HOME — Setup new game
+# SCREEN: HOME
 # ─────────────────────────────────────────────────────────────────────────────
 if st.session_state.screen == "home":
     st.markdown('<div class="section-label">New Game Setup</div>', unsafe_allow_html=True)
@@ -339,6 +411,11 @@ if st.session_state.screen == "home":
     with col3:
         date = st.date_input("Game Date", value=datetime.today())
 
+    is_goalie = st.checkbox(
+        "🧤 This player is a goalkeeper — enable goalie stats",
+        value=st.session_state.is_goalie
+    )
+
     st.markdown("<br>", unsafe_allow_html=True)
 
     if st.button("▶️  Start Tracking", use_container_width=False):
@@ -346,6 +423,7 @@ if st.session_state.screen == "home":
             st.session_state.player_name = player.strip()
             st.session_state.opponent = opponent.strip() or "Unknown"
             st.session_state.game_date = str(date)
+            st.session_state.is_goalie = is_goalie
             st.session_state.screen = "tracking"
             st.rerun()
         else:
@@ -360,13 +438,22 @@ if st.session_state.screen == "home":
             if game["stats"]["passes_successful"] + game["stats"]["passes_unsuccessful"] > 0:
                 total = game["stats"]["passes_successful"] + game["stats"]["passes_unsuccessful"]
                 acc = round(game["stats"]["passes_successful"] / total * 100, 1)
+
+            goalie_badge = " 🧤" if game.get("is_goalie") else ""
+            goalie_extra = ""
+            if game.get("is_goalie"):
+                gs = game["stats"]
+                total_faced = gs.get("saves", 0) + gs.get("goals_allowed", 0)
+                sv_pct = round(gs.get("saves", 0) / total_faced * 100, 1) if total_faced > 0 else 0
+                goalie_extra = f"&nbsp;·&nbsp; 🧤 {gs.get('saves',0)} saves &nbsp;·&nbsp; SV% {sv_pct}%"
+
             st.markdown(f"""
             <div class="saved-game-row">
-                <strong style="color:#e8f5e9;">{game['player']}</strong>
+                <strong style="color:#e8f5e9;">{game['player']}{goalie_badge}</strong>
                 vs {game['opponent']} &nbsp;·&nbsp;
                 ⚽ {game['stats']['goals']} goals &nbsp;·&nbsp;
                 🎯 {game['stats']['assists']} assists &nbsp;·&nbsp;
-                Pass accuracy: {acc}% ({total} passes)
+                Pass accuracy: {acc}% ({total} passes){goalie_extra}
                 <div class="saved-game-date">{game['date']} · Saved {game['saved_at']}</div>
             </div>
             """, unsafe_allow_html=True)
@@ -377,11 +464,14 @@ if st.session_state.screen == "home":
 elif st.session_state.screen == "tracking":
     s = st.session_state.stats
     acc, total_passes = pass_accuracy()
+    sv_pct, total_faced = save_percentage()
+
+    goalie_badge = " 🧤" if st.session_state.is_goalie else ""
 
     # Game header
     st.markdown(f"""
     <div class="game-card">
-        <div class="game-title-text">{st.session_state.player_name}</div>
+        <div class="game-title-text">{st.session_state.player_name}{goalie_badge}</div>
         <div class="game-meta">vs {st.session_state.opponent} &nbsp;·&nbsp; {st.session_state.game_date}</div>
     </div>
     """, unsafe_allow_html=True)
@@ -422,6 +512,38 @@ elif st.session_state.screen == "tracking":
                 <div class="stat-number">{val}</div>
                 <div class="stat-label">{icon} {label}</div>
             </div>""", unsafe_allow_html=True)
+
+    # ── Goalie live stats row ─────────────────────────────────────────
+    if st.session_state.is_goalie:
+        st.markdown('<div class="section-label" style="color:#a08030;">🧤 Goalie Stats</div>', unsafe_allow_html=True)
+        gcols = st.columns(3)
+        goalie_live = [
+            ("🧤", str(s["saves"]),           "Saves"),
+            ("🚨", str(s["goals_allowed"]),   "Goals Allowed"),
+            ("👊", str(s["goalie_clearances"]),"Goalie Clearances"),
+        ]
+        for i, (icon, val, label) in enumerate(goalie_live):
+            with gcols[i]:
+                st.markdown(f"""
+                <div class="stat-card-goalie">
+                    <div class="stat-number-goalie">{val}</div>
+                    <div class="stat-label-goalie">{icon} {label}</div>
+                </div>""", unsafe_allow_html=True)
+
+        # Save % bar
+        bar_width = sv_pct if sv_pct > 0 else 0
+        bar_color = "#ffc107" if sv_pct >= 70 else "#ff9800" if sv_pct >= 50 else "#f44336"
+        st.markdown(f"""
+        <div style="margin: 0.5rem 0 0.5rem;">
+            <div style="display:flex; justify-content:space-between; font-size:0.78rem; color:#a08030;">
+                <span>Save Percentage</span>
+                <span style="color:#ffe082; font-weight:600;">{sv_pct}%  ({total_faced} shots faced)</span>
+            </div>
+            <div class="save-bar-bg">
+                <div class="save-bar-fill" style="width:{bar_width}%; background:{bar_color};"></div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
     # Pass accuracy bar
     bar_width = acc if acc > 0 else 0
@@ -522,6 +644,25 @@ elif st.session_state.screen == "tracking":
             st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
 
+    # ── Goalie event buttons ──────────────────────────────────────────
+    if st.session_state.is_goalie:
+        st.markdown('<div class="event-section-goalie">', unsafe_allow_html=True)
+        st.markdown('<div class="event-section-title-goalie">🧤 Goalkeeper Events</div>', unsafe_allow_html=True)
+        g1, g2, g3 = st.columns(3)
+        with g1:
+            if st.button("🧤  Save"):
+                log_event("🧤 Save", "saves")
+                st.rerun()
+        with g2:
+            if st.button("🚨  Goal Allowed"):
+                log_event("🚨 Goal Allowed", "goals_allowed")
+                st.rerun()
+        with g3:
+            if st.button("👊  Goalie Clearance"):
+                log_event("👊 Goalie Clearance", "goalie_clearances")
+                st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
+
     # ── Undo + Save ───────────────────────────────────────────────────
     undo_col, save_col, end_col = st.columns([1, 1, 1])
     with undo_col:
@@ -569,7 +710,8 @@ elif st.session_state.screen == "history":
             total = s["passes_successful"] + s["passes_unsuccessful"]
             acc = round(s["passes_successful"] / total * 100, 1) if total > 0 else 0
 
-            with st.expander(f"⚽ {game['player']} vs {game['opponent']} — {game['date']}"):
+            goalie_badge = " 🧤" if game.get("is_goalie") else ""
+            with st.expander(f"⚽ {game['player']}{goalie_badge} vs {game['opponent']} — {game['date']}"):
                 c1, c2, c3, c4, c5, c6 = st.columns(6)
                 with c1:
                     st.metric("Goals", s["goals"])
@@ -597,6 +739,26 @@ elif st.session_state.screen == "history":
                     st.metric("Fouls Won", s["fouls_won"])
                 with c12:
                     st.metric("Fouls Given", s["fouls_committed"])
+
+                # ── Goalie stats in history ───────────────────────────
+                if game.get("is_goalie"):
+                    st.markdown("---")
+                    st.markdown("**🧤 Goalkeeper Stats**")
+                    saves = s.get("saves", 0)
+                    goals_allowed = s.get("goals_allowed", 0)
+                    goalie_clearances = s.get("goalie_clearances", 0)
+                    total_faced = saves + goals_allowed
+                    sv_pct = round(saves / total_faced * 100, 1) if total_faced > 0 else 0
+
+                    gc1, gc2, gc3, gc4 = st.columns(4)
+                    with gc1:
+                        st.metric("Saves", saves)
+                    with gc2:
+                        st.metric("Goals Allowed", goals_allowed)
+                    with gc3:
+                        st.metric("Goalie Clearances", goalie_clearances)
+                    with gc4:
+                        st.metric("Save %", f"{sv_pct}%")
 
                 # Event log
                 if game.get("event_log"):
@@ -628,22 +790,19 @@ elif st.session_state.screen == "trends":
     if not data["games"]:
         st.markdown('<div style="color:#3a6b3e; font-size:0.9rem;">No games saved yet. Track some games first!</div>', unsafe_allow_html=True)
     else:
-        # Get unique player names
         players = sorted(set(g["player"] for g in data["games"]))
-
-        # Player selector
         selected_player = st.selectbox("Select Player", players)
 
-        # Filter games for that player and sort by date
         player_games = sorted(
             [g for g in data["games"] if g["player"] == selected_player],
             key=lambda g: g["date"]
         )
 
+        is_goalie_player = any(g.get("is_goalie") for g in player_games)
+
         if len(player_games) < 1:
             st.info("No games found for this player.")
         else:
-            # Build dataframe
             rows = []
             for g in player_games:
                 s = g["stats"]
@@ -651,6 +810,11 @@ elif st.session_state.screen == "trends":
                 acc = round(s["passes_successful"] / total_passes * 100, 1) if total_passes > 0 else 0
                 total_shots = s["shots_on_target"] + s["shots_off_target"]
                 shot_acc = round(s["shots_on_target"] / total_shots * 100, 1) if total_shots > 0 else 0
+                saves = s.get("saves", 0)
+                goals_allowed = s.get("goals_allowed", 0)
+                goalie_clearances = s.get("goalie_clearances", 0)
+                total_faced = saves + goals_allowed
+                sv_pct = round(saves / total_faced * 100, 1) if total_faced > 0 else 0
                 rows.append({
                     "Date": g["date"],
                     "Opponent": g["opponent"],
@@ -671,6 +835,12 @@ elif st.session_state.screen == "trends":
                     "Turnovers": s["turnovers"],
                     "Fouls Won": s["fouls_won"],
                     "Fouls Committed": s["fouls_committed"],
+                    # Goalie
+                    "Saves": saves,
+                    "Goals Allowed": goals_allowed,
+                    "Goalie Clearances": goalie_clearances,
+                    "Save %": sv_pct,
+                    "Shots Faced": total_faced,
                 })
 
             df = pd.DataFrame(rows)
@@ -726,29 +896,56 @@ elif st.session_state.screen == "trends":
                     <div class="stat-sub">all time</div>
                 </div>""", unsafe_allow_html=True)
 
+            # ── Goalie career summary ─────────────────────────────────
+            if is_goalie_player:
+                st.markdown('<div class="section-label" style="color:#a08030;">🧤 Goalkeeper Career Averages</div>', unsafe_allow_html=True)
+                total_saves = int(total["Saves"])
+                total_allowed = int(total["Goals Allowed"])
+                total_gk_clears = int(total["Goalie Clearances"])
+                total_faced_all = total_saves + total_allowed
+                career_sv_pct = round(total_saves / total_faced_all * 100, 1) if total_faced_all > 0 else 0
+
+                gk1, gk2, gk3, gk4 = st.columns(4)
+                with gk1:
+                    st.markdown(f"""
+                    <div class="stat-card-goalie">
+                        <div class="stat-number-goalie">{total_saves}</div>
+                        <div class="stat-label-goalie">🧤 Total Saves</div>
+                    </div>""", unsafe_allow_html=True)
+                with gk2:
+                    st.markdown(f"""
+                    <div class="stat-card-goalie">
+                        <div class="stat-number-goalie">{total_allowed}</div>
+                        <div class="stat-label-goalie">🚨 Goals Allowed</div>
+                    </div>""", unsafe_allow_html=True)
+                with gk3:
+                    st.markdown(f"""
+                    <div class="stat-card-goalie">
+                        <div class="stat-number-goalie">{total_gk_clears}</div>
+                        <div class="stat-label-goalie">👊 Goalie Clearances</div>
+                    </div>""", unsafe_allow_html=True)
+                with gk4:
+                    st.markdown(f"""
+                    <div class="stat-card-goalie">
+                        <div class="stat-number-goalie">{career_sv_pct}%</div>
+                        <div class="stat-label-goalie">📊 Career Save %</div>
+                    </div>""", unsafe_allow_html=True)
+
             st.markdown("<br>", unsafe_allow_html=True)
 
             # ── Stat selector for chart ───────────────────────────────
             st.markdown('<div class="section-label">Game-by-Game Trend</div>', unsafe_allow_html=True)
 
             STAT_OPTIONS = [
-                "Goals",
-                "Assists",
-                "Goal Contributions",
-                "Pass Accuracy %",
-                "Total Passes",
-                "Successful Passes",
-                "Unsuccessful Passes",
-                "Shots on Target",
-                "Total Shots",
-                "Shot Accuracy %",
-                "Steals",
-                "Interceptions",
-                "Clearances",
-                "Turnovers",
-                "Fouls Won",
-                "Fouls Committed",
+                "Goals", "Assists", "Goal Contributions",
+                "Pass Accuracy %", "Total Passes", "Successful Passes", "Unsuccessful Passes",
+                "Shots on Target", "Total Shots", "Shot Accuracy %",
+                "Steals", "Interceptions", "Clearances", "Turnovers",
+                "Fouls Won", "Fouls Committed",
             ]
+
+            if is_goalie_player:
+                STAT_OPTIONS += ["Saves", "Goals Allowed", "Goalie Clearances", "Save %", "Shots Faced"]
 
             col_stat, col_chart_type = st.columns([3, 1])
             with col_stat:
@@ -762,7 +959,6 @@ elif st.session_state.screen == "trends":
 
             if selected_stats:
                 chart_df = df[["Date"] + selected_stats].set_index("Date")
-
                 if chart_type == "Line":
                     st.line_chart(chart_df, use_container_width=True, height=350)
                 else:
@@ -776,11 +972,14 @@ elif st.session_state.screen == "trends":
             display_cols = ["Date", "Opponent", "Goals", "Assists",
                             "Pass Accuracy %", "Total Passes", "Steals",
                             "Turnovers", "Interceptions", "Shots on Target"]
+            if is_goalie_player:
+                display_cols += ["Saves", "Goals Allowed", "Save %"]
 
             st.dataframe(
                 df[display_cols].style.format({
                     "Pass Accuracy %": "{:.1f}%",
                     "Shot Accuracy %": "{:.1f}%",
+                    "Save %": "{:.1f}%",
                 }),
                 use_container_width=True,
                 hide_index=True
@@ -790,12 +989,14 @@ elif st.session_state.screen == "trends":
             if len(df) > 1:
                 st.markdown('<div class="section-label">Highlights</div>', unsafe_allow_html=True)
 
-                h1, h2, h3 = st.columns(3)
-                best_goals_idx = df["Goals"].idxmax()
-                best_pass_idx  = df["Pass Accuracy %"].idxmax()
+                highlight_cols = 4 if is_goalie_player else 3
+                h_cols = st.columns(highlight_cols)
+
+                best_goals_idx  = df["Goals"].idxmax()
+                best_pass_idx   = df["Pass Accuracy %"].idxmax()
                 best_steals_idx = df["Steals"].idxmax()
 
-                with h1:
+                with h_cols[0]:
                     bg = df.loc[best_goals_idx]
                     st.markdown(f"""
                     <div class="stat-card">
@@ -803,7 +1004,7 @@ elif st.session_state.screen == "trends":
                         <div class="stat-label">Best Goals Game</div>
                         <div class="stat-sub">vs {bg['Opponent']} · {bg['Date']}</div>
                     </div>""", unsafe_allow_html=True)
-                with h2:
+                with h_cols[1]:
                     bp = df.loc[best_pass_idx]
                     st.markdown(f"""
                     <div class="stat-card">
@@ -811,7 +1012,7 @@ elif st.session_state.screen == "trends":
                         <div class="stat-label">Best Pass Accuracy</div>
                         <div class="stat-sub">vs {bp['Opponent']} · {bp['Date']}</div>
                     </div>""", unsafe_allow_html=True)
-                with h3:
+                with h_cols[2]:
                     bs = df.loc[best_steals_idx]
                     st.markdown(f"""
                     <div class="stat-card">
@@ -819,3 +1020,14 @@ elif st.session_state.screen == "trends":
                         <div class="stat-label">Most Steals Game</div>
                         <div class="stat-sub">vs {bs['Opponent']} · {bs['Date']}</div>
                     </div>""", unsafe_allow_html=True)
+
+                if is_goalie_player and df["Shots Faced"].max() > 0:
+                    best_sv_idx = df["Save %"].idxmax()
+                    with h_cols[3]:
+                        bsv = df.loc[best_sv_idx]
+                        st.markdown(f"""
+                        <div class="stat-card-goalie">
+                            <div class="stat-number-goalie">🧤 {bsv['Save %']:.0f}%</div>
+                            <div class="stat-label-goalie">Best Save %</div>
+                            <div class="stat-sub" style="color:#a08030;">vs {bsv['Opponent']} · {bsv['Date']}</div>
+                        </div>""", unsafe_allow_html=True)
