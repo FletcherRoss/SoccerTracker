@@ -263,6 +263,7 @@ CSV_FILE  = "soccer_stats.csv"
 # ─────────────────────────────────────────────────────────────────────────────
 CSV_COLUMNS = [
     "id", "saved_at", "date", "player", "opponent", "is_goalie",
+    "score_us", "score_them",
     "goals", "assists", "passes_successful", "passes_unsuccessful",
     "pass_accuracy_pct", "shots_on_target", "shots_off_target",
     "shot_accuracy_pct", "steals", "interceptions", "clearances",
@@ -287,6 +288,8 @@ def _game_to_csv_row(game: dict) -> dict:
         "player":                game["player"],
         "opponent":              game["opponent"],
         "is_goalie":             game.get("is_goalie", False),
+        "score_us":              game.get("score_us", ""),
+        "score_them":            game.get("score_them", ""),
         "goals":                 s["goals"],
         "assists":               s["assists"],
         "passes_successful":     s["passes_successful"],
@@ -365,6 +368,8 @@ def _csv_row_to_game(row: dict) -> dict:
         "date":     row.get("date", ""),
         "saved_at": row.get("saved_at", ""),
         "is_goalie": str(row.get("is_goalie", "False")).lower() in ("true", "1", "yes"),
+        "score_us":   row.get("score_us", ""),
+        "score_them": row.get("score_them", ""),
         "stats": {
             "goals":                i("goals"),
             "assists":              i("assists"),
@@ -628,10 +633,18 @@ if st.session_state.screen == "home":
                 sv_pct = round(gs.get("saves", 0) / total_faced * 100, 1) if total_faced > 0 else 0
                 goalie_extra = f"&nbsp;·&nbsp; 🧤 {gs.get('saves',0)} saves &nbsp;·&nbsp; SV% {sv_pct}%"
 
+            score_us = game.get("score_us", "")
+            score_them = game.get("score_them", "")
+            score_str = ""
+            if score_us != "" or score_them != "":
+                su = score_us if score_us != "" else "?"
+                st_s = score_them if score_them != "" else "?"
+                score_str = f"&nbsp;·&nbsp; 🏆 <strong>{su}–{st_s}</strong>"
+
             st.markdown(f"""
             <div class="saved-game-row">
                 <strong style="color:#e8f5e9;">{game['player']}{goalie_badge}</strong>
-                vs {game['opponent']} &nbsp;·&nbsp;
+                vs {game['opponent']}{score_str} &nbsp;·&nbsp;
                 ⚽ {game['stats']['goals']} goals &nbsp;·&nbsp;
                 🎯 {game['stats']['assists']} assists &nbsp;·&nbsp;
                 Pass accuracy: {acc}% ({total} passes){goalie_extra}
@@ -893,6 +906,33 @@ elif st.session_state.screen == "history":
 
             with st.expander(f"⚽ {game['player']}{goalie_badge} vs {game['opponent']} — {game['date']}"):
 
+                # ── Final score display ────────────────────────────────
+                score_us = game.get("score_us", "")
+                score_them = game.get("score_them", "")
+                if score_us != "" or score_them != "":
+                    su = score_us if score_us != "" else "?"
+                    st_s = score_them if score_them != "" else "?"
+                    if score_us != "" and score_them != "":
+                        try:
+                            result = "W" if int(score_us) > int(score_them) else ("L" if int(score_us) < int(score_them) else "D")
+                            result_color = "#4caf50" if result == "W" else "#f44336" if result == "L" else "#ffc107"
+                        except Exception:
+                            result, result_color = "", "#6a9e6e"
+                    else:
+                        result, result_color = "", "#6a9e6e"
+                    result_badge = f'<span style="background:{result_color};color:#0b1a0e;font-weight:700;border-radius:4px;padding:1px 7px;font-size:0.78rem;margin-left:8px;">{result}</span>' if result else ""
+                    st.markdown(f"""
+                    <div style="background:#0d1f10;border:1px solid #2e7d32;border-radius:8px;padding:0.5rem 1rem;margin-bottom:0.7rem;display:inline-block;">
+                        <span style="font-family:'Oswald',sans-serif;font-size:1.1rem;color:#e8f5e9;letter-spacing:1px;">
+                            Final Score: &nbsp;
+                            <span style="color:#4caf50;font-size:1.4rem;font-weight:700;">{su}</span>
+                            <span style="color:#6a9e6e;"> – </span>
+                            <span style="color:#e57373;font-size:1.4rem;font-weight:700;">{st_s}</span>
+                        </span>
+                        {result_badge}
+                    </div>
+                    """, unsafe_allow_html=True)
+
                 # ── Stats display ──────────────────────────────────────
                 c1, c2, c3, c4, c5, c6 = st.columns(6)
                 with c1:
@@ -1005,6 +1045,34 @@ elif st.session_state.screen == "history":
                         key=f"e_goalie_{game_id}"
                     )
 
+                    st.markdown("**🏆 Final Score**")
+                    fs1, fs2, fs3 = st.columns([2, 2, 3])
+                    with fs1:
+                        try:
+                            default_score_us = int(game.get("score_us", 0) or 0)
+                        except Exception:
+                            default_score_us = 0
+                        edit_score_us = st.number_input(
+                            "Our Score", min_value=0, value=default_score_us,
+                            key=f"e_score_us_{game_id}"
+                        )
+                    with fs2:
+                        try:
+                            default_score_them = int(game.get("score_them", 0) or 0)
+                        except Exception:
+                            default_score_them = 0
+                        edit_score_them = st.number_input(
+                            "Opponent Score", min_value=0, value=default_score_them,
+                            key=f"e_score_them_{game_id}"
+                        )
+                    with fs3:
+                        if edit_score_us > edit_score_them:
+                            st.markdown("<br><span style='color:#4caf50;font-weight:700;font-size:1rem;'>✅ Win</span>", unsafe_allow_html=True)
+                        elif edit_score_us < edit_score_them:
+                            st.markdown("<br><span style='color:#f44336;font-weight:700;font-size:1rem;'>❌ Loss</span>", unsafe_allow_html=True)
+                        else:
+                            st.markdown("<br><span style='color:#ffc107;font-weight:700;font-size:1rem;'>🤝 Draw</span>", unsafe_allow_html=True)
+
                     st.markdown("**⚔️ Attacking**")
                     ea1, ea2, ea3, ea4 = st.columns(4)
                     with ea1:
@@ -1077,11 +1145,13 @@ elif st.session_state.screen == "history":
                                 "goalie_clearances":    edit_gk_clears,
                             }
                             gh_ok, gh_msg = update_game(game_id, {
-                                "player":    edit_player.strip() or game["player"],
-                                "opponent":  edit_opponent.strip() or game["opponent"],
-                                "date":      str(edit_date),
-                                "is_goalie": edit_is_goalie,
-                                "stats":     updated_stats,
+                                "player":     edit_player.strip() or game["player"],
+                                "opponent":   edit_opponent.strip() or game["opponent"],
+                                "date":       str(edit_date),
+                                "is_goalie":  edit_is_goalie,
+                                "score_us":   edit_score_us,
+                                "score_them": edit_score_them,
+                                "stats":      updated_stats,
                             })
                             st.session_state.editing_game_id = None
                             if gh_ok:
