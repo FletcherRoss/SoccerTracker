@@ -1,3 +1,3 @@
 id,saved_at,date,player,opponent,is_goalie,goals,assists,passes_successful,passes_unsuccessful,pass_accuracy_pct,shots_on_target,shots_off_target,shot_accuracy_pct,steals,interceptions,clearances,turnovers,fouls_won,fouls_committed,saves,goals_allowed,goalie_clearances,save_pct
-20260418_192928,2026-04-18 19:29,2026-04-18,Oakley,Newton,True,1,0,0,0,0,2,2,50,0,0,0,0,1,0,1,0,0,100.0
-
+20260418_192928,2026-04-18 19:29,2026-04-18,Oakley,Newton,True,1,0,0,0,0,2,2,50.0,0,0,0,0,1,0,1,0,0,100.0
+20260502_134614,2026-05-02 13:46,2026-04-25,Oakley,Milford Hopedale,True,1,0,11,2,84.6,1,1,50.0,3,1,0,1,0,0,2,0,1,100.0
