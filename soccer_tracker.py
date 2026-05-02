@@ -210,6 +210,23 @@ html, body, [class*="css"] { font-family: 'Source Sans 3', sans-serif; }
 }
 .saved-game-date { color: #3a6b3e; font-size: 0.75rem; }
 
+/* ── Edit panel ── */
+.edit-panel {
+    background: #0d1f10;
+    border: 1px solid #2e7d32;
+    border-radius: 10px;
+    padding: 1.2rem 1.4rem;
+    margin-top: 0.8rem;
+}
+.edit-panel-title {
+    font-family: 'Oswald', sans-serif;
+    font-size: 0.85rem;
+    color: #81c784;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    margin-bottom: 0.8rem;
+}
+
 /* ── Streamlit overrides ── */
 .stButton > button {
     background: #132218 !important;
@@ -291,7 +308,6 @@ def _game_to_csv_row(game: dict) -> dict:
     }
 
 def _build_csv_content(games: list) -> str:
-    """Rebuild full CSV string from all games."""
     import io
     buf = io.StringIO()
     writer = csv.DictWriter(buf, fieldnames=CSV_COLUMNS, lineterminator="\n")
@@ -301,11 +317,6 @@ def _build_csv_content(games: list) -> str:
     return buf.getvalue()
 
 def push_csv_to_github(games: list) -> tuple[bool, str]:
-    """
-    Push the full CSV to GitHub (create or update soccer_stats.csv in repo root).
-    Reads token + repo from st.secrets[github].
-    Returns (success: bool, message: str).
-    """
     try:
         token = st.secrets["github"]["token"]
         repo  = st.secrets["github"]["repo"]
@@ -321,7 +332,6 @@ def push_csv_to_github(games: list) -> tuple[bool, str]:
         "Accept": "application/vnd.github+json",
     }
 
-    # Check if file already exists to get its SHA (required for updates)
     sha = None
     try:
         r = requests.get(api_url, headers=headers, timeout=10)
@@ -347,7 +357,6 @@ def push_csv_to_github(games: list) -> tuple[bool, str]:
         return False, f"Network error: {e}"
 
 def _csv_row_to_game(row: dict) -> dict:
-    """Convert a flat CSV row back into the nested game dict used by the app."""
     def i(k): return int(float(row.get(k, 0) or 0))
     return {
         "id":       row.get("id", ""),
@@ -373,12 +382,10 @@ def _csv_row_to_game(row: dict) -> dict:
             "goals_allowed":        i("goals_allowed"),
             "goalie_clearances":    i("goalie_clearances"),
         },
-        "event_log": [],  # event log not stored in CSV
+        "event_log": [],
     }
 
 def load_data():
-    """Load games — CSV is the source of truth; JSON is fallback."""
-    # ── Try CSV first ──────────────────────────────────────────────────
     if os.path.exists(CSV_FILE):
         try:
             with open(CSV_FILE, "r", newline="", encoding="utf-8") as f:
@@ -388,7 +395,6 @@ def load_data():
                 return {"games": games}
         except Exception:
             pass
-    # ── Fallback to JSON ───────────────────────────────────────────────
     if os.path.exists(DATA_FILE):
         try:
             with open(DATA_FILE, "r") as f:
@@ -428,13 +434,13 @@ def init_session():
             "fouls_committed": 0,
             "clearances": 0,
             "interceptions": 0,
-            # ── Goalie stats ──
             "saves": 0,
             "goals_allowed": 0,
             "goalie_clearances": 0,
         },
         "event_log": [],
         "viewing_game": None,
+        "editing_game_id": None,   # tracks which game is in edit mode
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -471,7 +477,6 @@ def undo_last():
         "⚠️ Foul Committed":         "fouls_committed",
         "🛡️ Clearance":              "clearances",
         "✂️ Interception":           "interceptions",
-        # Goalie
         "🧤 Save":                    "saves",
         "🚨 Goal Allowed":            "goals_allowed",
         "👊 Goalie Clearance":        "goalie_clearances",
@@ -496,7 +501,6 @@ def save_percentage():
     return round(pct, 1), total_faced
 
 def _write_local_csv(games: list):
-    """Rewrite the local CSV from all games so load_data() stays in sync."""
     with open(CSV_FILE, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS, lineterminator="\n")
         writer.writeheader()
@@ -517,9 +521,21 @@ def save_current_game():
     }
     data["games"].append(game)
     save_data(data)
-    _write_local_csv(data["games"])   # keep local CSV in sync
+    _write_local_csv(data["games"])
     gh_ok, gh_msg = push_csv_to_github(data["games"])
     return game["id"], gh_ok, gh_msg
+
+def update_game(game_id: str, updated_fields: dict):
+    """Update a saved game by ID and persist changes."""
+    data = load_data()
+    for i, g in enumerate(data["games"]):
+        if g["id"] == game_id:
+            data["games"][i].update(updated_fields)
+            break
+    save_data(data)
+    _write_local_csv(data["games"])
+    gh_ok, gh_msg = push_csv_to_github(data["games"])
+    return gh_ok, gh_msg
 
 def reset_tracker():
     keys = ["player_name","opponent","game_date","game_minute","is_goalie","stats","event_log","viewing_game"]
@@ -595,7 +611,6 @@ if st.session_state.screen == "home":
         else:
             st.error("Please enter the player's name.")
 
-    # Recent games preview
     data = load_data()
     if data["games"]:
         st.markdown('<div class="section-label">Recent Games</div>', unsafe_allow_html=True)
@@ -635,7 +650,6 @@ elif st.session_state.screen == "tracking":
 
     goalie_badge = " 🧤" if st.session_state.is_goalie else ""
 
-    # Game header
     st.markdown(f"""
     <div class="game-card">
         <div class="game-title-text">{st.session_state.player_name}{goalie_badge}</div>
@@ -643,7 +657,6 @@ elif st.session_state.screen == "tracking":
     </div>
     """, unsafe_allow_html=True)
 
-    # ── Live stats row ────────────────────────────────────────────────
     st.markdown('<div class="section-label">Live Stats</div>', unsafe_allow_html=True)
 
     stat_cols = st.columns(6)
@@ -680,7 +693,6 @@ elif st.session_state.screen == "tracking":
                 <div class="stat-label">{icon} {label}</div>
             </div>""", unsafe_allow_html=True)
 
-    # ── Goalie live stats row ─────────────────────────────────────────
     if st.session_state.is_goalie:
         st.markdown('<div class="section-label" style="color:#a08030;">🧤 Goalie Stats</div>', unsafe_allow_html=True)
         gcols = st.columns(3)
@@ -697,7 +709,6 @@ elif st.session_state.screen == "tracking":
                     <div class="stat-label-goalie">{icon} {label}</div>
                 </div>""", unsafe_allow_html=True)
 
-        # Save % bar
         bar_width = sv_pct if sv_pct > 0 else 0
         bar_color = "#ffc107" if sv_pct >= 70 else "#ff9800" if sv_pct >= 50 else "#f44336"
         st.markdown(f"""
@@ -712,7 +723,6 @@ elif st.session_state.screen == "tracking":
         </div>
         """, unsafe_allow_html=True)
 
-    # Pass accuracy bar
     bar_width = acc if acc > 0 else 0
     bar_color = "#4caf50" if acc >= 70 else "#ff9800" if acc >= 50 else "#f44336"
     st.markdown(f"""
@@ -727,7 +737,6 @@ elif st.session_state.screen == "tracking":
     </div>
     """, unsafe_allow_html=True)
 
-    # ── Game minute ───────────────────────────────────────────────────
     min_col1, min_col2 = st.columns([1, 4])
     with min_col1:
         st.session_state.game_minute = st.number_input(
@@ -736,10 +745,8 @@ elif st.session_state.screen == "tracking":
             label_visibility="visible"
         )
 
-    # ── Event buttons ─────────────────────────────────────────────────
     st.markdown('<div class="section-label">Log an Event</div>', unsafe_allow_html=True)
 
-    # Attacking
     st.markdown('<div class="event-section">', unsafe_allow_html=True)
     st.markdown('<div class="event-section-title">⚔️ Attacking</div>', unsafe_allow_html=True)
     a1, a2, a3, a4 = st.columns(4)
@@ -761,7 +768,6 @@ elif st.session_state.screen == "tracking":
             st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # Passing
     st.markdown('<div class="event-section">', unsafe_allow_html=True)
     st.markdown('<div class="event-section-title">🔄 Passing</div>', unsafe_allow_html=True)
     p1, p2 = st.columns(2)
@@ -775,7 +781,6 @@ elif st.session_state.screen == "tracking":
             st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # Defensive
     st.markdown('<div class="event-section">', unsafe_allow_html=True)
     st.markdown('<div class="event-section-title">🛡️ Defensive</div>', unsafe_allow_html=True)
     d1, d2, d3, d4 = st.columns(4)
@@ -797,7 +802,6 @@ elif st.session_state.screen == "tracking":
             st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # Negative events
     st.markdown('<div class="event-section">', unsafe_allow_html=True)
     st.markdown('<div class="event-section-title">⚠️ Negative Events</div>', unsafe_allow_html=True)
     n1, n2 = st.columns(2)
@@ -811,7 +815,6 @@ elif st.session_state.screen == "tracking":
             st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # ── Goalie event buttons ──────────────────────────────────────────
     if st.session_state.is_goalie:
         st.markdown('<div class="event-section-goalie">', unsafe_allow_html=True)
         st.markdown('<div class="event-section-title-goalie">🧤 Goalkeeper Events</div>', unsafe_allow_html=True)
@@ -830,7 +833,6 @@ elif st.session_state.screen == "tracking":
                 st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
 
-    # ── Undo + Save ───────────────────────────────────────────────────
     undo_col, save_col, end_col = st.columns([1, 1, 1])
     with undo_col:
         if st.button("↩️  Undo Last Event"):
@@ -854,7 +856,6 @@ elif st.session_state.screen == "tracking":
                 st.session_state["_gh_warn"] = gh_msg
             st.rerun()
 
-    # ── Event log ─────────────────────────────────────────────────────
     st.markdown('<div class="section-label">Event Log</div>', unsafe_allow_html=True)
     if st.session_state.event_log:
         for entry in reversed(st.session_state.event_log[-20:]):
@@ -873,7 +874,6 @@ elif st.session_state.screen == "tracking":
 elif st.session_state.screen == "history":
     st.markdown('<div class="section-label">Game History</div>', unsafe_allow_html=True)
 
-    # Show deferred GitHub push warning from End & Save
     if st.session_state.get("_gh_warn"):
         st.warning(st.session_state.pop("_gh_warn"))
 
@@ -888,7 +888,12 @@ elif st.session_state.screen == "history":
             acc = round(s["passes_successful"] / total * 100, 1) if total > 0 else 0
 
             goalie_badge = " 🧤" if game.get("is_goalie") else ""
+            game_id = game["id"]
+            is_editing = st.session_state.editing_game_id == game_id
+
             with st.expander(f"⚽ {game['player']}{goalie_badge} vs {game['opponent']} — {game['date']}"):
+
+                # ── Stats display ──────────────────────────────────────
                 c1, c2, c3, c4, c5, c6 = st.columns(6)
                 with c1:
                     st.metric("Goals", s["goals"])
@@ -917,7 +922,6 @@ elif st.session_state.screen == "history":
                 with c12:
                     st.metric("Fouls Given", s["fouls_committed"])
 
-                # ── Goalie stats in history ───────────────────────────
                 if game.get("is_goalie"):
                     st.markdown("---")
                     st.markdown("**🧤 Goalkeeper Stats**")
@@ -937,7 +941,6 @@ elif st.session_state.screen == "history":
                     with gc4:
                         st.metric("Save %", f"{sv_pct}%")
 
-                # Event log
                 if game.get("event_log"):
                     st.markdown("**Event Timeline:**")
                     for entry in game["event_log"]:
@@ -948,11 +951,151 @@ elif st.session_state.screen == "history":
                         </div>
                         """, unsafe_allow_html=True)
 
-                # Delete button
-                if st.button(f"🗑️ Delete this game", key=f"del_{game['id']}"):
-                    data["games"] = [g for g in data["games"] if g["id"] != game["id"]]
-                    save_data(data)
-                    st.rerun()
+                st.markdown("---")
+
+                # ── Edit / Delete buttons ──────────────────────────────
+                btn_col1, btn_col2 = st.columns([1, 1])
+                with btn_col1:
+                    edit_label = "✏️ Cancel Edit" if is_editing else "✏️ Edit Game"
+                    if st.button(edit_label, key=f"edit_toggle_{game_id}"):
+                        if is_editing:
+                            st.session_state.editing_game_id = None
+                        else:
+                            st.session_state.editing_game_id = game_id
+                        st.rerun()
+                with btn_col2:
+                    if st.button(f"🗑️ Delete this game", key=f"del_{game_id}"):
+                        data["games"] = [g for g in data["games"] if g["id"] != game_id]
+                        save_data(data)
+                        _write_local_csv(data["games"])
+                        if st.session_state.editing_game_id == game_id:
+                            st.session_state.editing_game_id = None
+                        st.rerun()
+
+                # ── Edit panel ─────────────────────────────────────────
+                if is_editing:
+                    st.markdown('<div class="edit-panel">', unsafe_allow_html=True)
+                    st.markdown('<div class="edit-panel-title">✏️ Edit Game</div>', unsafe_allow_html=True)
+
+                    # Game info
+                    ei1, ei2, ei3 = st.columns(3)
+                    with ei1:
+                        edit_player = st.text_input(
+                            "Player Name", value=game["player"],
+                            key=f"e_player_{game_id}"
+                        )
+                    with ei2:
+                        edit_opponent = st.text_input(
+                            "Opponent", value=game["opponent"],
+                            key=f"e_opponent_{game_id}"
+                        )
+                    with ei3:
+                        try:
+                            default_date = datetime.strptime(game["date"], "%Y-%m-%d").date()
+                        except Exception:
+                            default_date = datetime.today().date()
+                        edit_date = st.date_input(
+                            "Game Date", value=default_date,
+                            key=f"e_date_{game_id}"
+                        )
+
+                    edit_is_goalie = st.checkbox(
+                        "🧤 Goalkeeper",
+                        value=game.get("is_goalie", False),
+                        key=f"e_goalie_{game_id}"
+                    )
+
+                    st.markdown("**⚔️ Attacking**")
+                    ea1, ea2, ea3, ea4 = st.columns(4)
+                    with ea1:
+                        edit_goals = st.number_input("Goals", min_value=0, value=s["goals"], key=f"e_goals_{game_id}")
+                    with ea2:
+                        edit_assists = st.number_input("Assists", min_value=0, value=s["assists"], key=f"e_assists_{game_id}")
+                    with ea3:
+                        edit_shots_on = st.number_input("Shots on Target", min_value=0, value=s["shots_on_target"], key=f"e_sot_{game_id}")
+                    with ea4:
+                        edit_shots_off = st.number_input("Shots off Target", min_value=0, value=s["shots_off_target"], key=f"e_soff_{game_id}")
+
+                    st.markdown("**🔄 Passing**")
+                    ep1, ep2 = st.columns(2)
+                    with ep1:
+                        edit_pass_ok = st.number_input("Successful Passes", min_value=0, value=s["passes_successful"], key=f"e_pok_{game_id}")
+                    with ep2:
+                        edit_pass_bad = st.number_input("Unsuccessful Passes", min_value=0, value=s["passes_unsuccessful"], key=f"e_pbad_{game_id}")
+
+                    st.markdown("**🛡️ Defensive**")
+                    ed1, ed2, ed3, ed4 = st.columns(4)
+                    with ed1:
+                        edit_steals = st.number_input("Steals", min_value=0, value=s["steals"], key=f"e_steals_{game_id}")
+                    with ed2:
+                        edit_intercepts = st.number_input("Interceptions", min_value=0, value=s["interceptions"], key=f"e_int_{game_id}")
+                    with ed3:
+                        edit_clearances = st.number_input("Clearances", min_value=0, value=s["clearances"], key=f"e_clear_{game_id}")
+                    with ed4:
+                        edit_fouls_won = st.number_input("Fouls Won", min_value=0, value=s["fouls_won"], key=f"e_fw_{game_id}")
+
+                    st.markdown("**⚠️ Negative**")
+                    en1, en2 = st.columns(2)
+                    with en1:
+                        edit_turnovers = st.number_input("Turnovers", min_value=0, value=s["turnovers"], key=f"e_turn_{game_id}")
+                    with en2:
+                        edit_fouls_committed = st.number_input("Fouls Committed", min_value=0, value=s["fouls_committed"], key=f"e_fc_{game_id}")
+
+                    if edit_is_goalie:
+                        st.markdown("**🧤 Goalkeeper**")
+                        eg1, eg2, eg3 = st.columns(3)
+                        with eg1:
+                            edit_saves = st.number_input("Saves", min_value=0, value=s.get("saves", 0), key=f"e_saves_{game_id}")
+                        with eg2:
+                            edit_goals_allowed = st.number_input("Goals Allowed", min_value=0, value=s.get("goals_allowed", 0), key=f"e_ga_{game_id}")
+                        with eg3:
+                            edit_gk_clears = st.number_input("Goalie Clearances", min_value=0, value=s.get("goalie_clearances", 0), key=f"e_gkc_{game_id}")
+                    else:
+                        edit_saves = 0
+                        edit_goals_allowed = 0
+                        edit_gk_clears = 0
+
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    save_edit_col, cancel_col = st.columns([1, 1])
+                    with save_edit_col:
+                        if st.button("💾 Save Changes", key=f"save_edit_{game_id}", type="primary"):
+                            updated_stats = {
+                                "goals":                edit_goals,
+                                "assists":              edit_assists,
+                                "shots_on_target":      edit_shots_on,
+                                "shots_off_target":     edit_shots_off,
+                                "passes_successful":    edit_pass_ok,
+                                "passes_unsuccessful":  edit_pass_bad,
+                                "steals":               edit_steals,
+                                "interceptions":        edit_intercepts,
+                                "clearances":           edit_clearances,
+                                "fouls_won":            edit_fouls_won,
+                                "turnovers":            edit_turnovers,
+                                "fouls_committed":      edit_fouls_committed,
+                                "saves":                edit_saves,
+                                "goals_allowed":        edit_goals_allowed,
+                                "goalie_clearances":    edit_gk_clears,
+                            }
+                            gh_ok, gh_msg = update_game(game_id, {
+                                "player":    edit_player.strip() or game["player"],
+                                "opponent":  edit_opponent.strip() or game["opponent"],
+                                "date":      str(edit_date),
+                                "is_goalie": edit_is_goalie,
+                                "stats":     updated_stats,
+                            })
+                            st.session_state.editing_game_id = None
+                            if gh_ok:
+                                st.success(f"✅ Game updated! {gh_msg}")
+                            else:
+                                st.success("✅ Game updated locally.")
+                                st.warning(gh_msg)
+                            st.rerun()
+                    with cancel_col:
+                        if st.button("✖ Cancel", key=f"cancel_edit_{game_id}"):
+                            st.session_state.editing_game_id = None
+                            st.rerun()
+
+                    st.markdown('</div>', unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SCREEN: TRENDS
@@ -1012,7 +1155,6 @@ elif st.session_state.screen == "trends":
                     "Turnovers": s["turnovers"],
                     "Fouls Won": s["fouls_won"],
                     "Fouls Committed": s["fouls_committed"],
-                    # Goalie
                     "Saves": saves,
                     "Goals Allowed": goals_allowed,
                     "Goalie Clearances": goalie_clearances,
@@ -1022,7 +1164,6 @@ elif st.session_state.screen == "trends":
 
             df = pd.DataFrame(rows)
 
-            # ── Career summary cards ──────────────────────────────────
             st.markdown('<div class="section-label">Career Averages</div>', unsafe_allow_html=True)
 
             avg = df.mean(numeric_only=True)
@@ -1073,7 +1214,6 @@ elif st.session_state.screen == "trends":
                     <div class="stat-sub">all time</div>
                 </div>""", unsafe_allow_html=True)
 
-            # ── Goalie career summary ─────────────────────────────────
             if is_goalie_player:
                 st.markdown('<div class="section-label" style="color:#a08030;">🧤 Goalkeeper Career Averages</div>', unsafe_allow_html=True)
                 total_saves = int(total["Saves"])
@@ -1110,7 +1250,6 @@ elif st.session_state.screen == "trends":
 
             st.markdown("<br>", unsafe_allow_html=True)
 
-            # ── Stat selector for chart ───────────────────────────────
             st.markdown('<div class="section-label">Game-by-Game Trend</div>', unsafe_allow_html=True)
 
             STAT_OPTIONS = [
@@ -1143,7 +1282,6 @@ elif st.session_state.screen == "trends":
             else:
                 st.info("Select at least one stat above to see the chart.")
 
-            # ── Game by game table ────────────────────────────────────
             st.markdown('<div class="section-label">Full Game Log</div>', unsafe_allow_html=True)
 
             display_cols = ["Date", "Opponent", "Goals", "Assists",
@@ -1162,7 +1300,6 @@ elif st.session_state.screen == "trends":
                 hide_index=True
             )
 
-            # ── Best/worst game highlights ────────────────────────────
             if len(df) > 1:
                 st.markdown('<div class="section-label">Highlights</div>', unsafe_allow_html=True)
 
